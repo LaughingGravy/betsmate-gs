@@ -1,0 +1,141 @@
+
+type Country {
+  countryId: ID!;
+  name: String;
+  locations: [Location] @relation(name: "COUNTRY_IN", direction: "IN");
+}
+
+type Season {
+  seasonId: ID!;
+  from: Date;
+  to: Date;
+  divisionSeasons: [DivisionSeason] @relation(name: "SEASON_IN", direction: "IN")
+}
+
+type Division {
+  divisionId: ID!;
+  name: String;
+  tier: Int;
+  league: League @relation(name: "DIVISION_OF", direction: "IN");
+  divisonSeasons: [DivisionSeason] @relation(name: "DIVISION_IN", direction: "IN");
+}
+
+type Location {
+  locationId: ID!;
+  name:   String;
+  country: Country @relation(name: "COUNTRY_IN", direction: "OUT");
+  leagues: [League] @relation(name: "ADMINISTERED_IN", direction: "IN");
+  stadiums: [Stadium] @relation(name: "LOCATED_AT", direction: "IN")
+}
+
+type League {
+  leagueId: ID;
+  name: String;
+  administered_in: Location @relation(name: "ADMINISTERED_IN", direction: "OUT");
+  divisions: [Division] @relation(name: "DIVISION_OF", direction: "OUT");
+}
+
+type Stadium {
+  stadiumId: ID!;
+  name: String;
+  sited_at: Location @relation(name: "LOCATED_AT", direction: "OUT");
+  clubs: [Club] @relation(name: "PLAYS_AT", direction: "IN");
+  matches: [Match] @relation(name: "PLAYED_AT", direction: "IN");
+}
+
+type DivisionSeason {
+  divisionSeasonId: ID!;
+  win: Int;
+  draw: Int;
+  loss: Int;
+  divison: Division @relation(name: "DIVISION_IN", direction: "OUT");
+  season: Season @relation(name: "SEASON_IN", direction: "OUT");
+  matches: [Match] @relation(name: "MATCHES_PLAYED_IN", direction: "OUT");
+  clubs: [Club] @relation(name: "DIVISION_SEASON_IN", direction: "IN");
+}
+
+type Club {
+  clubId: ID!;
+  name: String;
+  nickname: String;
+  shortname: String;
+  stadium: Stadium @relation(name: "PLAYS_AT", direction: "OUT");
+  leagueCompetitions: [DivisionSeason] @relation(name: "DIVISION_SEASON_IN", direction: "OUT");
+  matches: [Match] @relation(name: "PLAYED_IN", direction: "OUT");
+}
+
+type Match {
+  matchId: ID!;
+  matchDate: Date;
+  homeScore: Int;
+  awayScore: Int;
+  homeTeam: Club @relation(name: "PLAYED_IN", direction: "IN");
+  awayTeam: Club @relation(name: "PLAYED_IN", direction: "IN");
+  stadium: Stadium @relation(name: "PLAYED_AT", direction: "OUT");
+  competition: DivisionSeason @relation(name: "COMPETITION_PLAYED_IN", direction: "IN")
+}
+
+type User {
+  userId: ID!
+  name: String
+  reviews: [Review] @relation(name: "WROTE", direction: "OUT")
+  avgStars: Float
+    @cypher(
+      statement: "MATCH (this)-[:WROTE]->(r:Review) RETURN toFloat(avg(r.stars))"
+    )
+  numReviews: Int
+    @cypher(statement: "MATCH (this)-[:WROTE]->(r:Review) RETURN COUNT(r)")
+  recommendations(first: Int = 3): [Business]
+    @cypher(
+      statement: "MATCH (this)-[:WROTE]->(r:Review)-[:REVIEWS]->(:Business)<-[:REVIEWS]-(:Review)<-[:WROTE]-(:User)-[:WROTE]->(:Review)-[:REVIEWS]->(rec:Business) WHERE NOT EXISTS( (this)-[:WROTE]->(:Review)-[:REVIEWS]->(rec) ) WITH rec, COUNT(*) AS num ORDER BY num DESC LIMIT $first RETURN rec"
+    )
+}
+
+type Business {
+  businessId: ID!
+  name: String!
+  address: String
+  city: String
+  state: String
+  location: Point
+  avgStars: Float
+    @cypher(
+      statement: "MATCH (this)<-[:REVIEWS]-(r:Review) RETURN coalesce(avg(r.stars),0.0)"
+    )
+  reviews: [Review] @relation(name: "REVIEWS", direction: "IN")
+  categories: [Category] @relation(name: "IN_CATEGORY", direction: "OUT")
+}
+
+type Review {
+  reviewId: ID!
+  stars: Float
+  text: String
+  date: Date
+  business: Business @relation(name: "REVIEWS", direction: "OUT")
+  user: User @relation(name: "WROTE", direction: "IN")
+}
+
+type Category {
+  name: ID!
+  businesses: [Business] @relation(name: "IN_CATEGORY", direction: "IN")
+}
+
+type RatingCount {
+  stars: Float!
+  count: Int!
+}
+
+type Mutation {
+  mergeBusinessCategory(categories: [String!]!, businessId: ID!): Business
+    @cypher(
+      statement: "MATCH (b:Business {businessId: $businessId}) UNWIND $categories AS cat MERGE (c:Category {name: cat}) MERGE (b)-[:IN_CATEGORY]->(c) RETURN b"
+    )
+}
+
+type Query {
+  userCount: Int! @cypher(statement: "MATCH (u:User) RETURN COUNT(u)")
+  ratingsCount: [RatingCount]
+    @cypher(
+      statement: "MATCH (r:Review) WITH r.stars AS stars, COUNT(*) AS count ORDER BY stars RETURN {stars: stars, count: count}"
+    )
+}
